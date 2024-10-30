@@ -1,0 +1,4 @@
+*.o
+*.mod
+divergence_2d_benchmarks
+divergence_3d_benchmarks
