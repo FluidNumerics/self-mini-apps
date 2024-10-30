@@ -70,7 +70,7 @@ __global__ void __launch_bounds__(256) divergence_2d_naive_gpukernel(double *f, 
 
         for(int ii = 0; ii<N+1; ii++){
             dfloc += dmatrix[ii+(N+1)*i]*f[ii+(N+1)*(j+(N+1)*(iel + nel*(ivar)))]+
-                     dmatrix[ii+(N+1)*j]*f[i+(N+1)*(ii+(N+1)*(iel + nel*(ivar + nvar)))]
+                     dmatrix[ii+(N+1)*j]*f[i+(N+1)*(ii+(N+1)*(iel + nel*(ivar + nvar)))];
         }
         df[idof + nq*(iel + nel*ivar)] += dfloc;
     }
@@ -166,16 +166,14 @@ __global__ void __launch_bounds__(512) divergence_2d_naive_sm_gpukernel(double *
         __shared__ double dmloc[64];
         f1[i+(N+1)*(j)] = f[i+(N+1)*(j+(N+1)*(iel + nel*(ivar)))];
         f2[i+(N+1)*(j)] = f[i+(N+1)*(j+(N+1)*(iel + nel*(ivar + nvar)))];
-        if( k == 0 ){
-            dmloc[i+(N+1)*j] = dmatrix[i+(N+1)*j];
-        }
+        dmloc[i+(N+1)*j] = dmatrix[i+(N+1)*j];
         __syncthreads();
 
         double dfloc = 0.0;
 
         for(int ii = 0; ii<N+1; ii++){
             dfloc += dmloc[ii+(N+1)*i]*f1[ii+(N+1)*(j)]+
-                     dmloc[ii+(N+1)*j]*f2[i+(N+1)*(ii)]+
+                     dmloc[ii+(N+1)*j]*f2[i+(N+1)*(ii)];
         }
         df[idof + nq*(iel + nel*ivar)] += dfloc;
     //}
@@ -185,8 +183,8 @@ __global__ void __launch_bounds__(512) divergence_2d_naive_sm_gpukernel(double *
 extern "C"
 {
   void divergence_2d_naive_sm_gpu(double *f, double *df, double *dmatrix, int N, int nel, int nvar){
-    int nq = (N+1)*(N+1)*(N+1);
-    int threads_per_block = 512;
+    int nq = (N+1)*(N+1);
+    int threads_per_block = 64;
    // int nblocks_x = nq/threads_per_block;
 
     divergence_2d_naive_sm_gpukernel<<<dim3(1,nel,nvar), dim3(threads_per_block,1,1), 0, 0>>>(f,df,dmatrix,nq,N,nel,nvar);

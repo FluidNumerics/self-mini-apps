@@ -24,7 +24,7 @@
 !
 ! //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////// !
 
-module divergence_kernels
+module divergence_3d_kernels
 
 use SELF_Constants
 use SELF_Lagrange
@@ -172,11 +172,11 @@ subroutine divergence_doconcurrent(f,df,interp,nelem,nvar)
 
   endsubroutine divergence_gpublas
 
-endmodule divergence_kernels
+endmodule divergence_3d_kernels
 
 program divergence_benchmarks
 
-use divergence_kernels
+use divergence_3d_kernels
 use SELF_Scalar_3D
 use SELF_Vector_3D
 use omp_lib

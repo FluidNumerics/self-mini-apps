@@ -24,7 +24,7 @@
 !
 ! //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////// !
 
-module divergence_kernels
+module divergence_2d_kernels
 
 use SELF_Constants
 use SELF_Lagrange
@@ -87,7 +87,7 @@ subroutine divergence_doconcurrent(f,df,interp,nelem,nvar)
       do ii = 1,interp%N+1
         dfLoc = dfLoc+interp%dMatrix(ii,i)*f(ii,j,iel,ivar,1)
       enddo
-      dF(i,j,k,iel,ivar) = dfLoc
+      dF(i,j,iel,ivar) = dfLoc
 
     enddo
 
@@ -98,7 +98,7 @@ subroutine divergence_doconcurrent(f,df,interp,nelem,nvar)
       do ii = 1,interp%N+1
         dfLoc = dfLoc+interp%dMatrix(ii,j)*f(i,ii,iel,ivar,2)
       enddo
-      dF(i,j,iel,ivar) = dF(i,j,k,iel,ivar)+dfLoc
+      dF(i,j,iel,ivar) = dF(i,j,iel,ivar)+dfLoc
 
     enddo
 
@@ -120,7 +120,7 @@ subroutine divergence_doconcurrent(f,df,interp,nelem,nvar)
       dfLoc = 0.0_prec
       do ii = 1,interp%N+1
         dfLoc = dfLoc+interp%dMatrix(ii,i)*f(ii,j,iel,ivar,1)+&
-                      interp%dMatrix(ii,j)*f(i,ii,iel,ivar,2)+&
+                      interp%dMatrix(ii,j)*f(i,ii,iel,ivar,2)
 
       enddo
       dF(i,j,iel,ivar) = dfLoc
@@ -156,11 +156,11 @@ subroutine divergence_doconcurrent(f,df,interp,nelem,nvar)
 
   endsubroutine divergence_gpublas
 
-endmodule divergence_kernels
+endmodule divergence_2d_kernels
 
 program divergence_benchmarks
 
-use divergence_kernels
+use divergence_2d_kernels
 use SELF_Scalar_2d
 use SELF_Vector_2d
 use omp_lib
