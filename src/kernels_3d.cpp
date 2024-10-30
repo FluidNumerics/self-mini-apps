@@ -134,7 +134,7 @@ __global__ void __launch_bounds__(512) divergence_3d_dim1_sm_gpukernel(double *f
 
         double dfloc = 0.0;
         for(int ii = 0; ii<N+1; ii++){
-            dfloc += dmatrix[ii+(N+1)*i]*floc[ii+(N+1)*(j+(N+1)*k)]; //f[ii+(N+1)*(j+(N+1)*(k + (N+1)*(iel + nel*ivar)))];
+            dfloc += dmatrix[ii+(N+1)*i]*floc[ii+(N+1)*(j+(N+1)*k)];
         }
         df[idof + nq*(iel + nel*ivar)] = dfloc;
     //}
@@ -183,7 +183,7 @@ __global__ void __launch_bounds__(512) divergence_3d_dim3_sm_gpukernel(double *f
         double dfloc = 0.0;
 
         for(int ii = 0; ii<N+1; ii++){
-            dfloc += dmatrix[ii+(N+1)*k]*floc[i+(N+1)*(j+(N+1)*ii)];//*f[i+(N+1)*(j+(N+1)*(ii + (N+1)*(iel + nel*(ivar + 2*nvar))))];
+            dfloc += dmatrix[ii+(N+1)*k]*floc[i+(N+1)*(j+(N+1)*ii)];
         }
         df[idof + nq*(iel + nel*ivar)] += dfloc;
    // }
@@ -216,9 +216,13 @@ __global__ void __launch_bounds__(512) divergence_3d_naive_sm_gpukernel(double *
         uint32_t j = (idof/(N+1)) % (N+1);
         uint32_t k = (idof/(N+1)/(N+1));
 
-        __shared__ double floc[512];
+        __shared__ double f1[512];
+        __shared__ double f2[512];
+        __shared__ double f3[512];
         __shared__ double dmloc[64];
-        floc[i+(N+1)*(j+(N+1)*k)] = f[i+(N+1)*(j+(N+1)*(k + (N+1)*(iel + nel*(ivar + 2*nvar))))];
+        f1[i+(N+1)*(j+(N+1)*k)] = f[i+(N+1)*(j+(N+1)*(k + (N+1)*(iel + nel*(ivar))))];
+        f2[i+(N+1)*(j+(N+1)*k)] = f[i+(N+1)*(j+(N+1)*(k + (N+1)*(iel + nel*(ivar + nvar))))];
+        f3[i+(N+1)*(j+(N+1)*k)] = f[i+(N+1)*(j+(N+1)*(k + (N+1)*(iel + nel*(ivar + 2*nvar))))];
         if( k == 0 ){
             dmloc[i+(N+1)*j] = dmatrix[i+(N+1)*j];
         }
@@ -227,9 +231,9 @@ __global__ void __launch_bounds__(512) divergence_3d_naive_sm_gpukernel(double *
         double dfloc = 0.0;
 
         for(int ii = 0; ii<N+1; ii++){
-            dfloc += dmloc[ii+(N+1)*i]*floc[ii+(N+1)*(j+(N+1)*(k))]+
-                     dmloc[ii+(N+1)*j]*floc[i+(N+1)*(ii+(N+1)*(k))]+
-                     dmloc[ii+(N+1)*k]*floc[i+(N+1)*(j+(N+1)*(ii))];
+            dfloc += dmloc[ii+(N+1)*i]*f1[ii+(N+1)*(j+(N+1)*(k))]+
+                     dmloc[ii+(N+1)*j]*f2[i+(N+1)*(ii+(N+1)*(k))]+
+                     dmloc[ii+(N+1)*k]*f3[i+(N+1)*(j+(N+1)*(ii))];
         }
         df[idof + nq*(iel + nel*ivar)] += dfloc;
     //}
