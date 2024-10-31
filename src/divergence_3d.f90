@@ -176,257 +176,312 @@ endmodule divergence_3d_kernels
 
 program divergence_benchmarks
 
-use divergence_3d_kernels
-use SELF_Scalar_3D
-use SELF_Vector_3D
-use omp_lib
-
-implicit none
-
-integer, parameter :: N = 7
-integer, parameter :: M = 13
-integer, parameter :: nvar = 7
-integer, parameter :: nelem = 5000
-integer, parameter :: nrepeats = 100 ! How many times to call
-
-type(Lagrange),target :: interp
-type(Vector3D) :: f
-type(Scalar3D) :: df
-type(c_ptr) :: magma_queue
-integer :: i
-integer(kind=8) :: ndof
-real(prec) :: est_flops, est_bytes
-real(prec) :: t1, t2, wall_time, avg_wall_time
-
-
-print*, ""
-print*, "                            ░▒▓▓█████████▓▒▒░"
-print*, "                         ░▓███████████████████▓░"
-print*, "                       ▒████████▓▓▒▒▒▒▒▓▓████████▒"
-print*, "                     ▓████▓▒░              ░░▓█████▒"
-print*, "                   ▒████▒                      ░▒████░"
-print*, "                  ▓██▓░                           ▒███▒"
-print*, "                ░███░                               ▒██▓"
-print*, "                ██▓                                  ░██▓"
-print*, "               ██▓                                    ░██▒"
-print*, "              ▒██                                      ░██░"
-print*, "              ██░    ░▒▒░                      ░▒▒▒     ▓██"
-print*, "             ▒██    ▒█████▒                   ▓█████░   ░██░"
-print*, "             ██▓    ███████▓                 ████████    ██▒"
-print*, "             ██▓    ████  ▒█▒               ▓█░ ░███▓    ██▓"
-print*, "             ███    ░▓█▒   █▓               █▓   ▓█▓    ░██▓"
-print*, "             ███▒          █▓               █▓          ▓██▓"
-print*, "             ▓███         ░█░               ▓█         ░███▒"
-print*, "             ░███▒        █▓                 █▓        ▓███"
-print*, "              ▓███▒     ░█▓                  ░█▓░     ▓███▒"
-print*, "               ▓███▓▒▒▓██▓                    ░▓██▒▒▓████▒"
-print*, "                ░▓█████▒░                       ░▓█████▒░"
-print*, ""
-print*, "                ▒▒▒▒▒▒▒▒▒ ▒▒        ▒▒     ▒▒ ▒▒ ▒▒▒▒▒▒▒▒"
-print*, "                ▒▒        ▒▒        ▒▒     ▒▒ ▒▒ ▒▒    `▒▒"
-print*, "               ▒▒▒▒▒▒▒    ▒▒        ▒▒     ▒▒ ▒▒ ▒▒     ▒▒"
-print*, "                ▒▒        ▒▒        ▒▒     ▒▒ ▒▒ ▒▒     ▒▒"
-print*, "                ▒▒        ▒▒        ▒▒.   .▒▒ ▒▒ ▒▒    .▒▒"
-print*, "                ▒▒        ▒▒▒▒▒▒▒▒▒ `▒▒▒▒▒▒▒' ▒▒ ▒▒▒▒▒▒▒▒"
-print*, ""
-print*, "▒▒▒▒▒▒▒▒  ▒▒     ▒▒ ▒▒▒▒▒▒.▒▒▒▒   ▒▒▒▒▒▒▒▒▒  ▒▒▒▒▒▒▒▒  ▒▒  ▒▒▒▒▒▒▒. .▒▒▒▒▒▒▒"
-print*, "▒▒    `▒▒ ▒▒     ▒▒ ▒▒  `▒▒  `▒▒  ▒▒         ▒▒    `▒▒ ▒▒ ▒▒'   `▒▒ ▒▒.     '"
-print*, "▒▒     ▒▒ ▒▒     ▒▒ ▒▒   ▒▒   ▒▒ ▒▒▒▒▒▒▒    ▒▒▒▒▒▒▒▒▒' ▒▒ ▒▒        `▒▒▒▒▒▒▒."
-print*, "▒▒     ▒▒ ▒▒     ▒▒ ▒▒   ▒▒   ▒▒  ▒▒         ▒▒   `▒▒. ▒▒ ▒▒              `▒▒"
-print*, "▒▒     ▒▒ ▒▒.   .▒▒ ▒▒   ▒▒   ▒▒  ▒▒         ▒▒     ▒▒ ▒▒ ▒▒.   .▒▒ ▒▒'   .▒▒"
-print*, "▒▒     ▒▒ `▒▒▒▒▒▒▒' ▒▒   ▒▒   ▒▒  ▒▒▒▒▒▒▒▒▒  ▒▒     ▒▒ ▒▒  ▒▒▒▒▒▒▒'  ▒▒▒▒▒▒▒"
-print*, ""
-print*, ""
-
-
-  ! The number of degrees of freedom
-  ndof = (N+1)*(N+1)*(N+1)*nvar*nelem
-
-  ! Estimated number of flops. For each degree of freedom, we perform three vector-vector products.
-  ! The multiplication by two occurs since each component of the vector-vector product is a FMA
-  est_flops = real(ndof*(N+1)*3*2,prec)/10.0_prec**9 ! in GFLOPs 
-
-  ! For each vector-vector product, we read 
-  !   > N+1 derivative matrix entries
-  !   > N+1 vector values
-  ! and we write
-  !   > 1 scalar value
-  est_bytes = real(ndof*( 2*(N+1) + 1 )*prec,prec)/10.0_prec**9 ! in GB
-
-  print*, " =============================================================================== "
-  print*, " (SELF) Divergence 3D Kernel Benchmark                     "
-  print*, " =============================================================================== "
-  print*, " N. Repeats          : ", nrepeats
-  print*, " Control degree      : ", N
-  print*, " No. Elements        : ", nElem
-  print*, " No. Variables       : ", nVar
-  print*, " Degrees of Freedom  : ", ndof
-  print*, " Est. GFLOPs         : ", est_flops
-  print*, " Est. Bytes (MB)     : ", est_bytes
-  print*, " Est. FLOPs/Byte     : ", real(est_flops,prec)/real(est_bytes,prec)
-  print*, " =============================================================================== "
-
-  ! Create an interpolant
-  call interp%Init(N=N, &
-                   controlNodeType=GAUSS, &
-                   M=M, &
-                   targetNodeType=UNIFORM)
-
-   ! Initialize vectors
-   call f%Init(interp,nvar,nelem)
-   
-   call df%Init(interp,nvar,nelem)
-   
-   ! Set the source vector (on the control grid) to a non-zero constant
-   f%interior = 1.0_prec
-
-   call f%UpdateDevice()
-
-   t1 = omp_get_wtime()
-   do i = 1, nrepeats
-    call divergence_doconcurrent(f%interior,df%interior,interp,nelem,nvar)
-   enddo
-   t2 = omp_get_wtime()
-
-   wall_time = t2-t1
-   avg_wall_time = (t2-t1)/(real(nrepeats,prec))
-
-   print*, "   Divergence (do concurrent)"
-   print*, " ------------------------------------------------------------------------------- "
-   print*, " Total Wall Time (s)   : ", wall_time
-   print*, " Avg. Wall Time (s)    : ", avg_wall_time
-   print*, " Est. GFLOPs/sec       : ", real(est_flops,prec)/avg_wall_time
-   print*, " Est. Bandwidth (GB/s) : ", real(est_bytes,prec)/avg_wall_time
-   print*, " =============================================================================== "
-
-   t1 = omp_get_wtime()
-   do i = 1, nrepeats
-    call divergence_naive_doconcurrent(f%interior,df%interior,interp,nelem,nvar)
-   enddo
-   t2 = omp_get_wtime()
-
-   wall_time = t2-t1
-   avg_wall_time = (t2-t1)/(real(nrepeats,prec))
-
-   print*, "   Divergence (do concurrent [naive])"
-   print*, " ------------------------------------------------------------------------------- "
-   print*, " Total Wall Time (s)   : ", wall_time
-   print*, " Avg. Wall Time (s)    : ", avg_wall_time
-   print*, " Est. GFLOPs/sec       : ", real(est_flops,prec)/avg_wall_time
-   print*, " Est. Bandwidth (GB/s) : ", real(est_bytes,prec)/avg_wall_time
-   print*, " =============================================================================== "
-
-   t1 = omp_get_wtime()
-   do i = 1, nrepeats
-    call divergence_3d_naive_gpu(f%interior_gpu,df%interior_gpu,interp%dMatrix_gpu,interp%N,nelem,nvar)
-   enddo
-   t2 = omp_get_wtime()
-
-   wall_time = t2-t1
-   avg_wall_time = (t2-t1)/(real(nrepeats,prec))
-
-
-   print*, "   Divergence (hip kernel [naive])"
-   print*, " ------------------------------------------------------------------------------- "
-   print*, " Total Wall Time (s)   : ", wall_time
-   print*, " Avg. Wall Time (s)    : ", avg_wall_time
-   print*, " Est. GFLOPs/sec       : ", real(est_flops,prec)/avg_wall_time
-   print*, " Est. Bandwidth (GB/s) : ", real(est_bytes,prec)/avg_wall_time
-   print*, " =============================================================================== "
-
-
-
-   t1 = omp_get_wtime()
-   do i = 1, nrepeats
-    call divergence_gpublas(f%interior_gpu,df%interior_gpu,interp,nelem,nvar,f%blas_handle)
-   enddo
-   t2 = omp_get_wtime()
-
-   wall_time = t2-t1
-   avg_wall_time = (t2-t1)/(real(nrepeats,prec))
-
-
-   print*, "   Divergence (hipblas)"
-   print*, " ------------------------------------------------------------------------------- "
-   print*, " Total Wall Time (s)   : ", wall_time
-   print*, " Avg. Wall Time (s)    : ", avg_wall_time
-   print*, " Est. GFLOPs/sec       : ", real(est_flops,prec)/avg_wall_time
-   print*, " Est. Bandwidth (GB/s) : ", real(est_bytes,prec)/avg_wall_time
-   print*, " =============================================================================== "
-
-   t1 = omp_get_wtime()
-   do i = 1, nrepeats
-    call divergence_3d_gpu(f%interior_gpu,df%interior_gpu,interp%dMatrix_gpu,interp%N,nelem,nvar)
-   enddo
-   t2 = omp_get_wtime()
-
-   wall_time = t2-t1
-   avg_wall_time = (t2-t1)/(real(nrepeats,prec))
-   call df%UpdateHost()
-
-   if(maxval(abs(df%interior)) >= 10.0_prec**(-7)) then
-     print*, "your kernel sucks!"
-     print*, maxval(abs(df%interior))
-   endif
-
-   print*, "   Divergence (hip kernel)"
-   print*, " ------------------------------------------------------------------------------- "
-   print*, " Total Wall Time (s)   : ", wall_time
-   print*, " Avg. Wall Time (s)    : ", avg_wall_time
-   print*, " Est. GFLOPs/sec       : ", real(est_flops,prec)/avg_wall_time
-   print*, " Est. Bandwidth (GB/s) : ", real(est_bytes,prec)/avg_wall_time
-   print*, " =============================================================================== "
-
-   t1 = omp_get_wtime()
-   do i = 1, nrepeats
-    call divergence_3d_sm_gpu(f%interior_gpu,df%interior_gpu,interp%dMatrix_gpu,interp%N,nelem,nvar)
-   enddo
-   t2 = omp_get_wtime()
-
-   wall_time = (t2-t1)
-   avg_wall_time = (t2-t1)/(real(nrepeats,prec))
-   call df%UpdateHost()
-
-   if(maxval(abs(df%interior)) >= 10.0_prec**(-7)) then
-     print*, "your kernel sucks!"
-     print*, maxval(abs(df%interior))
-   endif
-
-   print*, "   Divergence (hip kernel [shared memory])"
-   print*, " ------------------------------------------------------------------------------- "
-   print*, " Total Wall Time (s)   : ", wall_time
-   print*, " Avg. Wall Time (s)    : ", avg_wall_time
-   print*, " Est. GFLOPs/sec       : ", real(est_flops,prec)/avg_wall_time
-   print*, " Est. Bandwidth (GB/s) : ", real(est_bytes,prec)/avg_wall_time
-   print*, " =============================================================================== "
-
-   t1 = omp_get_wtime()
-   do i = 1, nrepeats
-    call divergence_3d_naive_sm_gpu(f%interior_gpu,df%interior_gpu,interp%dMatrix_gpu,interp%N,nelem,nvar)
-   enddo
-   t2 = omp_get_wtime()
-
-   wall_time = (t2-t1)
-   avg_wall_time = (t2-t1)/(real(nrepeats,prec))
-   call df%UpdateHost()
-
-   if(maxval(abs(df%interior)) >= 10.0_prec**(-7)) then
-     print*, "your kernel sucks!"
-     print*, maxval(abs(df%interior))
-   endif
-
-   print*, "   Divergence (hip kernel [naive+shared memory])"
-   print*, " ------------------------------------------------------------------------------- "
-   print*, " Total Wall Time (s)   : ", wall_time
-   print*, " Avg. Wall Time (s)    : ", avg_wall_time
-   print*, " Est. GFLOPs/sec       : ", real(est_flops,prec)/avg_wall_time
-   print*, " Est. Bandwidth (GB/s) : ", real(est_bytes,prec)/avg_wall_time
-   print*, " =============================================================================== "
-
-
-
-   call f%free()
-   call df%free()
-   call interp%free()
-
-endprogram divergence_benchmarks
+  use divergence_3d_kernels
+  use SELF_Scalar_3d
+  use SELF_Vector_3d
+  use omp_lib
+  
+  implicit none
+  
+  integer, parameter :: M = 13
+  integer, parameter :: nvar = 7
+  integer, parameter :: nelem = 2000
+  integer, parameter :: nrepeats = 100 ! How many times to call
+  
+  type(Lagrange),target :: interp
+  type(Vector3d) :: f
+  type(Scalar3d) :: df
+  integer :: i, fid, N, ierr, num_args
+  logical :: file_exists
+  character(len=100) :: arg
+  integer(kind=8) :: ndof
+  real(prec) :: est_flops, est_bytes
+  real(prec) :: t1, t2, wall_time, avg_wall_time
+  
+  
+  print*, ""
+  print*, "                            ░▒▓▓█████████▓▒▒░"
+  print*, "                         ░▓███████████████████▓░"
+  print*, "                       ▒████████▓▓▒▒▒▒▒▓▓████████▒"
+  print*, "                     ▓████▓▒░              ░░▓█████▒"
+  print*, "                   ▒████▒                      ░▒████░"
+  print*, "                  ▓██▓░                           ▒███▒"
+  print*, "                ░███░                               ▒██▓"
+  print*, "                ██▓                                  ░██▓"
+  print*, "               ██▓                                    ░██▒"
+  print*, "              ▒██                                      ░██░"
+  print*, "              ██░    ░▒▒░                      ░▒▒▒     ▓██"
+  print*, "             ▒██    ▒█████▒                   ▓█████░   ░██░"
+  print*, "             ██▓    ███████▓                 ████████    ██▒"
+  print*, "             ██▓    ████  ▒█▒               ▓█░ ░███▓    ██▓"
+  print*, "             ███    ░▓█▒   █▓               █▓   ▓█▓    ░██▓"
+  print*, "             ███▒          █▓               █▓          ▓██▓"
+  print*, "             ▓███         ░█░               ▓█         ░███▒"
+  print*, "             ░███▒        █▓                 █▓        ▓███"
+  print*, "              ▓███▒     ░█▓                  ░█▓░     ▓███▒"
+  print*, "               ▓███▓▒▒▓██▓                    ░▓██▒▒▓████▒"
+  print*, "                ░▓█████▒░                       ░▓█████▒░"
+  print*, ""
+  print*, "                ▒▒▒▒▒▒▒▒▒ ▒▒        ▒▒     ▒▒ ▒▒ ▒▒▒▒▒▒▒▒"
+  print*, "                ▒▒        ▒▒        ▒▒     ▒▒ ▒▒ ▒▒    `▒▒"
+  print*, "               ▒▒▒▒▒▒▒    ▒▒        ▒▒     ▒▒ ▒▒ ▒▒     ▒▒"
+  print*, "                ▒▒        ▒▒        ▒▒     ▒▒ ▒▒ ▒▒     ▒▒"
+  print*, "                ▒▒        ▒▒        ▒▒.   .▒▒ ▒▒ ▒▒    .▒▒"
+  print*, "                ▒▒        ▒▒▒▒▒▒▒▒▒ `▒▒▒▒▒▒▒' ▒▒ ▒▒▒▒▒▒▒▒"
+  print*, ""
+  print*, "▒▒▒▒▒▒▒▒  ▒▒     ▒▒ ▒▒▒▒▒▒.▒▒▒▒   ▒▒▒▒▒▒▒▒▒  ▒▒▒▒▒▒▒▒  ▒▒  ▒▒▒▒▒▒▒. .▒▒▒▒▒▒▒"
+  print*, "▒▒    `▒▒ ▒▒     ▒▒ ▒▒  `▒▒  `▒▒  ▒▒         ▒▒    `▒▒ ▒▒ ▒▒'   `▒▒ ▒▒.     '"
+  print*, "▒▒     ▒▒ ▒▒     ▒▒ ▒▒   ▒▒   ▒▒ ▒▒▒▒▒▒▒    ▒▒▒▒▒▒▒▒▒' ▒▒ ▒▒        `▒▒▒▒▒▒▒."
+  print*, "▒▒     ▒▒ ▒▒     ▒▒ ▒▒   ▒▒   ▒▒  ▒▒         ▒▒   `▒▒. ▒▒ ▒▒              `▒▒"
+  print*, "▒▒     ▒▒ ▒▒.   .▒▒ ▒▒   ▒▒   ▒▒  ▒▒         ▒▒     ▒▒ ▒▒ ▒▒.   .▒▒ ▒▒'   .▒▒"
+  print*, "▒▒     ▒▒ `▒▒▒▒▒▒▒' ▒▒   ▒▒   ▒▒  ▒▒▒▒▒▒▒▒▒  ▒▒     ▒▒ ▒▒  ▒▒▒▒▒▒▒'  ▒▒▒▒▒▒▒"
+  print*, ""
+  print*, ""
+  
+      ! Get the number of arguments passed to the program
+  num_args = command_argument_count()
+  
+  ! Check if the required arguments are provided
+  if (num_args < 1) then
+      print *, 'Usage: divergence_3d_benchmarks <polynomial-degree>'
+      print *, 'Setting polynomial degree to default (7)'
+      N = 7
+  else
+    ! Retrieve the filename (first argument)
+    call get_command_argument(1, arg)
+    read(arg, *, iostat=ierr) N
+    if (ierr /= 0) then
+        print *, 'Error: scale_factor must be a number'
+        stop
+    end if
+  end if
+  
+  
+    ! The number of degrees of freedom
+    ndof = (N+1)*(N+1)*(N+1)*nvar*nelem
+  
+    ! Estimated number of flops. For each degree of freedom, we perform three vector-vector products.
+    ! The multiplication by two occurs since each component of the vector-vector product is a FMA
+    est_flops = real(ndof*(N+1)*3*2,prec)/10.0_prec**9 ! in GFLOPs 
+  
+    ! For each vector-vector product, we read 
+    !   > N+1 derivative matrix entries
+    !   > N+1 vector values
+    ! and we write
+    !   > 1 scalar value
+    est_bytes = real(ndof*( 3*(N+1) + 1 )*prec,prec)/10.0_prec**9 ! in GB
+  
+    print*, " =============================================================================== "
+    print*, " (SELF) Divergence 3d Kernel Benchmark                     "
+    print*, " =============================================================================== "
+    print*, " N. Repeats          : ", nrepeats
+    print*, " Control degree      : ", N
+    print*, " No. Elements        : ", nElem
+    print*, " No. Variables       : ", nVar
+    print*, " Degrees of Freedom  : ", ndof
+    print*, " Est. GFLOPs         : ", est_flops
+    print*, " Est. Bytes (MB)     : ", est_bytes
+    print*, " Est. FLOPs/Byte     : ", real(est_flops,prec)/real(est_bytes,prec)
+    print*, " =============================================================================== "
+  
+    ! Define the output file name and open the file
+    inquire( file='divergence_3d_benchmarks.csv', exist=file_exists )
+    if( file_exists ) then
+      open(newunit=fid, file='divergence_3d_benchmarks.csv', action='write',status='old', position='append')
+    else
+      print*, " ★ Starting new divergence file ★ "
+      open(newunit=fid, file='divergence_3d_benchmarks.csv', status='new', action='write')
+      write(fid,"(A)") "nElem,N,nVar,Iterations,Implementation,AverageRuntime,GFLOPS,GB/s"
+    endif
+  
+    ! Create an interpolant
+    call interp%Init(N=N, &
+                     controlNodeType=GAUSS, &
+                     M=M, &
+                     targetNodeType=UNIFORM)
+  
+     ! Initialize vectors
+     call f%Init(interp,nvar,nelem)
+     
+     call df%Init(interp,nvar,nelem)
+     
+     ! Set the source vector (on the control grid) to a non-zero constant
+     f%interior = 1.0_prec
+  
+     call f%UpdateDevice()
+  
+     t1 = omp_get_wtime()
+     do i = 1, nrepeats
+      call divergence_doconcurrent(f%interior,df%interior,interp,nelem,nvar)
+     enddo
+     t2 = omp_get_wtime()
+  
+     wall_time = t2-t1
+     avg_wall_time = (t2-t1)/(real(nrepeats,prec))
+  
+     print*, "   Divergence (do concurrent [split])"
+     print*, " ------------------------------------------------------------------------------- "
+     print*, " Total Wall Time (s)   : ", wall_time
+     print*, " Avg. Wall Time (s)    : ", avg_wall_time
+     print*, " Est. GFLOPs/sec       : ", real(est_flops,prec)/avg_wall_time
+     print*, " Est. Bandwidth (GB/s) : ", real(est_bytes,prec)/avg_wall_time
+     print*, " =============================================================================== "
+     write(fid,'(I7,",",I7,",",I7,",",I7,",",A,",",E13.4,",",E13.4,",",E13.4)') nelem,N,nvar,nrepeats,&
+                                                                      "do concurrent [split]",&
+                                                                      avg_wall_time,&
+                                                                      real(est_flops,prec)/avg_wall_time,&
+                                                                      real(est_bytes,prec)/avg_wall_time
+     t1 = omp_get_wtime()
+     do i = 1, nrepeats
+      call divergence_naive_doconcurrent(f%interior,df%interior,interp,nelem,nvar)
+     enddo
+     t2 = omp_get_wtime()
+  
+     wall_time = t2-t1
+     avg_wall_time = (t2-t1)/(real(nrepeats,prec))
+  
+     print*, "   Divergence (do concurrent [naive])"
+     print*, " ------------------------------------------------------------------------------- "
+     print*, " Total Wall Time (s)   : ", wall_time
+     print*, " Avg. Wall Time (s)    : ", avg_wall_time
+     print*, " Est. GFLOPs/sec       : ", real(est_flops,prec)/avg_wall_time
+     print*, " Est. Bandwidth (GB/s) : ", real(est_bytes,prec)/avg_wall_time
+     print*, " =============================================================================== "
+     write(fid,'(I7,",",I7,",",I7,",",I7,",",A,",",E13.4,",",E13.4,",",E13.4)') nelem,N,nvar,nrepeats,&
+                                                                      "do concurrent [naive]",&
+                                                                      avg_wall_time,&
+                                                                      real(est_flops,prec)/avg_wall_time,&
+                                                                      real(est_bytes,prec)/avg_wall_time
+  
+     t1 = omp_get_wtime()
+     do i = 1, nrepeats
+      call divergence_3d_naive_gpu(f%interior_gpu,df%interior_gpu,interp%dMatrix_gpu,interp%N,nelem,nvar)
+     enddo
+     t2 = omp_get_wtime()
+  
+     wall_time = t2-t1
+     avg_wall_time = (t2-t1)/(real(nrepeats,prec))
+  
+     print*, "   Divergence (hip kernel [naive])"
+     print*, " ------------------------------------------------------------------------------- "
+     print*, " Total Wall Time (s)   : ", wall_time
+     print*, " Avg. Wall Time (s)    : ", avg_wall_time
+     print*, " Est. GFLOPs/sec       : ", real(est_flops,prec)/avg_wall_time
+     print*, " Est. Bandwidth (GB/s) : ", real(est_bytes,prec)/avg_wall_time
+     print*, " =============================================================================== "
+     write(fid,'(I7,",",I7,",",I7,",",I7,",",A,",",E13.4,",",E13.4,",",E13.4)') nelem,N,nvar,nrepeats,&
+                                                                      "hip kernel [naive]",&
+                                                                      avg_wall_time,&
+                                                                      real(est_flops,prec)/avg_wall_time,&
+                                                                      real(est_bytes,prec)/avg_wall_time
+  
+     t1 = omp_get_wtime()
+     do i = 1, nrepeats
+      call divergence_gpublas(f%interior_gpu,df%interior_gpu,interp,nelem,nvar,f%blas_handle)
+     enddo
+     t2 = omp_get_wtime()
+  
+     wall_time = t2-t1
+     avg_wall_time = (t2-t1)/(real(nrepeats,prec))
+  
+     print*, "   Divergence (hipblas)"
+     print*, " ------------------------------------------------------------------------------- "
+     print*, " Total Wall Time (s)   : ", wall_time
+     print*, " Avg. Wall Time (s)    : ", avg_wall_time
+     print*, " Est. GFLOPs/sec       : ", real(est_flops,prec)/avg_wall_time
+     print*, " Est. Bandwidth (GB/s) : ", real(est_bytes,prec)/avg_wall_time
+     print*, " =============================================================================== "
+     write(fid,'(I7,",",I7,",",I7,",",I7,",",A,",",E13.4,",",E13.4,",",E13.4)') nelem,N,nvar,nrepeats,&
+                                                                      "hipblas",&
+                                                                      avg_wall_time,&
+                                                                      real(est_flops,prec)/avg_wall_time,&
+                                                                      real(est_bytes,prec)/avg_wall_time
+     t1 = omp_get_wtime()
+     do i = 1, nrepeats
+      call divergence_3d_gpu(f%interior_gpu,df%interior_gpu,interp%dMatrix_gpu,interp%N,nelem,nvar)
+     enddo
+     t2 = omp_get_wtime()
+  
+     wall_time = t2-t1
+     avg_wall_time = (t2-t1)/(real(nrepeats,prec))
+     call df%UpdateHost()
+  
+     if(maxval(abs(df%interior)) >= 10.0_prec**(-7)) then
+       print*, "your kernel sucks!"
+       print*, maxval(abs(df%interior))
+     endif
+  
+     print*, "   Divergence (hip kernel [split])"
+     print*, " ------------------------------------------------------------------------------- "
+     print*, " Total Wall Time (s)   : ", wall_time
+     print*, " Avg. Wall Time (s)    : ", avg_wall_time
+     print*, " Est. GFLOPs/sec       : ", real(est_flops,prec)/avg_wall_time
+     print*, " Est. Bandwidth (GB/s) : ", real(est_bytes,prec)/avg_wall_time
+     print*, " =============================================================================== "
+     write(fid,'(I7,",",I7,",",I7,",",I7,",",A,",",E13.4,",",E13.4,",",E13.4)') nelem,N,nvar,nrepeats,&
+                                                                      "hip kernel [split]",&
+                                                                      avg_wall_time,&
+                                                                      real(est_flops,prec)/avg_wall_time,&
+                                                                      real(est_bytes,prec)/avg_wall_time
+     t1 = omp_get_wtime()
+     do i = 1, nrepeats
+      call divergence_3d_sm_gpu(f%interior_gpu,df%interior_gpu,interp%dMatrix_gpu,interp%N,nelem,nvar)
+     enddo
+     t2 = omp_get_wtime()
+  
+     wall_time = (t2-t1)
+     avg_wall_time = (t2-t1)/(real(nrepeats,prec))
+     call df%UpdateHost()
+  
+     if(maxval(abs(df%interior)) >= 10.0_prec**(-7)) then
+       print*, "your kernel sucks!"
+       print*, maxval(abs(df%interior))
+     endif
+  
+     print*, "   Divergence (hip kernel [split +shared memory])"
+     print*, " ------------------------------------------------------------------------------- "
+     print*, " Total Wall Time (s)   : ", wall_time
+     print*, " Avg. Wall Time (s)    : ", avg_wall_time
+     print*, " Est. GFLOPs/sec       : ", real(est_flops,prec)/avg_wall_time
+     print*, " Est. Bandwidth (GB/s) : ", real(est_bytes,prec)/avg_wall_time
+     print*, " =============================================================================== "
+     write(fid,'(I7,",",I7,",",I7,",",I7,",",A,",",E13.4,",",E13.4,",",E13.4)') nelem,N,nvar,nrepeats,&
+                                                                      "hip kernel [split +shared-memory]",&
+                                                                      avg_wall_time,&
+                                                                      real(est_flops,prec)/avg_wall_time,&
+                                                                      real(est_bytes,prec)/avg_wall_time
+     t1 = omp_get_wtime()
+     do i = 1, nrepeats
+      call divergence_3d_naive_sm_gpu(f%interior_gpu,df%interior_gpu,interp%dMatrix_gpu,interp%N,nelem,nvar)
+     enddo
+     t2 = omp_get_wtime()
+  
+     wall_time = (t2-t1)
+     avg_wall_time = (t2-t1)/(real(nrepeats,prec))
+     call df%UpdateHost()
+  
+     if(maxval(abs(df%interior)) >= 10.0_prec**(-7)) then
+       print*, "your kernel sucks!"
+       print*, maxval(abs(df%interior))
+     endif
+  
+     print*, "   Divergence (hip kernel [naive+shared memory])"
+     print*, " ------------------------------------------------------------------------------- "
+     print*, " Total Wall Time (s)   : ", wall_time
+     print*, " Avg. Wall Time (s)    : ", avg_wall_time
+     print*, " Est. GFLOPs/sec       : ", real(est_flops,prec)/avg_wall_time
+     print*, " Est. Bandwidth (GB/s) : ", real(est_bytes,prec)/avg_wall_time
+     print*, " =============================================================================== "
+     write(fid,'(I7,",",I7,",",I7,",",I7,",",A,",",E13.4,",",E13.4,",",E13.4)') nelem,N,nvar,nrepeats,&
+                                                                      "hip kernel [naive +shared-memory]",&
+                                                                      avg_wall_time,&
+                                                                      real(est_flops,prec)/avg_wall_time,&
+                                                                      real(est_bytes,prec)/avg_wall_time
+  
+  
+     close(fid)
+     call f%free()
+     call df%free()
+     call interp%free()
+  
+  endprogram divergence_benchmarks
