@@ -208,7 +208,7 @@ extern "C"
 __global__ void __launch_bounds__(512) divergence_3d_naive_sm_gpukernel(double *f, double *df, double *dmatrix, int nq, int N, int nel, int nvar){
 
     uint32_t idof = threadIdx.x + blockIdx.x*blockDim.x;
-    //if( idof < nq ){
+    if( idof < nq ){
         
         uint32_t iel = blockIdx.y;
         uint32_t ivar = blockIdx.z;
@@ -236,7 +236,7 @@ __global__ void __launch_bounds__(512) divergence_3d_naive_sm_gpukernel(double *
                      dmloc[ii+(N+1)*k]*f3[i+(N+1)*(j+(N+1)*(ii))];
         }
         df[idof + nq*(iel + nel*ivar)] += dfloc;
-    //}
+    }
 
 }
 
